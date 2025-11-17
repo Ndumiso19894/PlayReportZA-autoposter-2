@@ -19,152 +19,178 @@ async function runAutoposter(env, manual = false) {
     const pageId = env.FB_PAGE_ID;
 
     if (!apiKey || !fbToken || !pageId) {
-      return jsonResp({ error: "Missing environment variables" }, 500);
+      return new Response(JSON.stringify({
+        error: "Missing environment variables"
+      }, null, 2), { status: 500 });
     }
 
-    // SA timezone
-    const saTime = (iso) =>
-      new Date(iso).toLocaleString("en-ZA", {
-        timeZone: "Africa/Johannesburg",
-        hour: "2-digit",
-        minute: "2-digit"
-      });
+    const today = new Date().toISOString().slice(0, 10);
+    const apiUrl = `https://v3.football.api-sports.io/fixtures?date=${today}`;
 
-    const today = new Date().toISOString().split("T")[0];
-    const apiRes = await fetch(
-      `https://v3.football.api-sports.io/fixtures?date=${today}`,
-      { headers: { "x-apisports-key": apiKey } }
-    );
-    const apiData = await apiRes.json();
+    const res = await fetch(apiUrl, {
+      headers: { "x-apisports-key": apiKey }
+    });
 
-    if (!apiData.response) {
-      return jsonResp({ error: "API returned no data" }, 500);
-    }
+    const data = await res.json();
+    if (!data.response) data.response = [];
 
-    // GROUP BY LEAGUE
-    const leagues = {};
-    for (const m of apiData.response) {
-      const leagueName = `${m.league.country} - ${m.league.name}`;
-      if (!leagues[leagueName]) leagues[leagueName] = [];
-      leagues[leagueName].push(m);
-    }
+    // 🇿🇦 Convert UTC → SAST
+    const toSAST = (utc) => {
+      let d = new Date(utc);
+      d.setHours(d.getHours() + 2);
+      return d;
+    };
 
-    let liveSection = "🔥 *LIVE Matches*\n";
-    let htSection = "\n⏸️ *Half Time Results*\n";
-    let ftSection = "\n🏁 *Full Time Results*\n";
+    // 🧩 Categorize Matches
+    const liveMatches = [];
+    const htMatches = [];
+    const ftMatches = [];
 
-    let hasLive = false, hasHT = false, hasFT = false;
+    const sixHoursAgo = Date.now() - 6 * 60 * 60 * 1000;
 
-    for (const league of Object.keys(leagues)) {
-      const matches = leagues[league];
+    data.response.forEach(m => {
+      const status = m.fixture.status.short;
+      const kick = toSAST(m.fixture.date);
 
-      // SORT by kickoff
-      matches.sort((a,b)=> new Date(a.fixture.date) - new Date(b.fixture.date));
+      if (status === "FT" && (new Date(m.fixture.date).getTime() >= sixHoursAgo)) {
+        ftMatches.push(m);
+      } else if (status === "HT") {
+        htMatches.push(m);
+      } else if (["1H", "2H", "LIVE", "ET"].includes(status)) {
+        liveMatches.push(m);
+      }
+    });
 
-      let liveBlock = "";
-      let htBlock = "";
-      let ftBlock = "";
+    const formatMatch = (m, tag) => {
+      const kick = toSAST(m.fixture.date);
+      const timeHHMM = kick.toTimeString().slice(0, 5);
 
-      for (const m of matches) {
-        const time = saTime(m.fixture.date);
-        const status = m.fixture.status.short;
-        
-        const home = m.teams.home.name;
-        const away = m.teams.away.name;
-        const goalsHome = m.goals.home ?? 0;
-        const goalsAway = m.goals.away ?? 0;
+      let emoji = tag === "LIVE" ? "LIVE 🔴" :
+                  tag === "HT"   ? "HT ⏸️" :
+                  "FT ✅";
 
-        // Build GOAL DETAILS
-        let goalDetails = "";
-        if (m.events) {
-          const goals = m.events.filter(e => e.type === "Goal");
-          if (goals.length > 0) {
-            goalDetails = goals
-              .map(g => `⚽ ${g.player.name} (${g.time.elapsed}')`)
-              .join(", ");
-          }
-        }
+      let goals = "";
+      if (m.goals.home !== null) {
+        goals = `${m.goals.home}–${m.goals.away}`;
+      }
 
-        // Stats
-        const stats = m.statistics?.[0]?.statistics || [];
-        const corners = findStat(stats, "Corner Kicks");
-        const poss = findStat(stats, "Ball Possession");
-
-        const extraStats =
-          (corners ? `🚩 Corners: ${corners}\n` : "") +
-          (poss ? `📊 Possession: ${poss}\n` : "");
-
-        // Build match line
-        const line =
-          `${time} | ${home} ${goalsHome}–${goalsAway} ${away}\n` +
-          (goalDetails ? `${goalDetails}\n` : "") +
-          extraStats;
-
-        if (status === "1H" || status === "2H" || status === "LIVE") {
-          hasLive = true;
-          liveBlock += line + "\n";
-        } 
-        else if (status === "HT") {
-          hasHT = true;
-          htBlock += line + "\n";
-        } 
-        else if (status === "FT") {
-          hasFT = true;
-          ftBlock += line + "\n";
+      let goalMinutes = "";
+      if (m.events) {
+        const g = m.events.filter(e => e.type === "Goal");
+        if (g.length > 0) {
+          goalMinutes = "⚽ Goals: " + g.map(x => `${x.time.elapsed}'`).join(", ");
         }
       }
 
-      if (liveBlock) liveSection += `\n📍 ${league}\n${liveBlock}`;
-      if (htBlock) htSection += `\n📍 ${league}\n${htBlock}`;
-      if (ftBlock) ftSection += `\n📍 ${league}\n${ftBlock}`;
+      let corners = "";
+      if (m.statistics && m.statistics[0]?.statistics && m.statistics[1]?.statistics) {
+        const home = m.statistics[0].statistics.find(s => s.type === "Corner Kicks");
+        const away = m.statistics[1].statistics.find(s => s.type === "Corner Kicks");
+        if (home && away) {
+          corners = `🚩 Corners: ${home.value}–${away.value}`;
+        }
+      }
+
+      let poss = "";
+      if (m.statistics && m.statistics[0]?.statistics && m.statistics[1]?.statistics) {
+        const home = m.statistics[0].statistics.find(s => s.type === "Ball Possession");
+        const away = m.statistics[1].statistics.find(s => s.type === "Ball Possession");
+        if (home && away) {
+          poss = `📊 Possession: ${home.value}–${away.value}`;
+        }
+      }
+
+      let statsBlock = "";
+      if (goalMinutes) statsBlock += goalMinutes + "\n";
+      if (corners) statsBlock += corners + "\n";
+      if (poss) statsBlock += poss + "\n";
+
+      return (
+        `${emoji} | ${timeHHMM} | ${m.teams.home.name} ${goals} ${m.teams.away.name}\n` +
+        (statsBlock ? statsBlock.trim() + "\n" : "")
+      );
+    };
+
+    // Group by leagues
+    const groupByLeague = (array) => {
+      const grouped = {};
+      array.forEach(m => {
+        const league = `${m.league.country} - ${m.league.name}`;
+        if (!grouped[league]) grouped[league] = [];
+        grouped[league].push(m);
+      });
+      Object.keys(grouped).forEach(k => {
+        grouped[k].sort((a, b) =>
+          new Date(a.fixture.date) - new Date(b.fixture.date)
+        );
+      });
+      return grouped;
+    };
+
+    const liveGroups = groupByLeague(liveMatches);
+    const htGroups = groupByLeague(htMatches);
+    const ftGroups = groupByLeague(ftMatches);
+
+    // Final message
+    let message = `🔥 Today’s Live Fixtures (SAST)\n\n`;
+
+    // LIVE
+    message += `🔴 LIVE MATCHES\n`;
+    if (liveMatches.length === 0) message += "No live matches\n";
+    else {
+      for (const league in liveGroups) {
+        message += `📍 ${league}\n`;
+        liveGroups[league].forEach(m => {
+          message += formatMatch(m, "LIVE") + "\n";
+        });
+      }
     }
 
-    let finalMessage = `⚽ *Today's Live Fixtures* (${currentSA()})\n`;
+    // HT
+    message += `\n⏸️ HALFTIME MATCHES\n`;
+    if (htMatches.length === 0) message += "No halftime matches\n";
+    else {
+      for (const league in htGroups) {
+        message += `📍 ${league}\n`;
+        htGroups[league].forEach(m => {
+          message += formatMatch(m, "HT") + "\n";
+        });
+      }
+    }
 
-    if (hasLive) finalMessage += liveSection;
-    if (hasHT) finalMessage += htSection;
-    if (hasFT) finalMessage += ftSection;
+    // FT
+    message += `\n✅ FULL-TIME (Last 6 Hours)\n`;
+    if (ftMatches.length === 0) message += "No recent full-time matches\n";
+    else {
+      for (const league in ftGroups) {
+        message += `📍 ${league}\n`;
+        ftGroups[league].forEach(m => {
+          message += formatMatch(m, "FT") + "\n";
+        });
+      }
+    }
 
-    finalMessage += `\n\n👉 Follow for more updates\n#Football #LiveScores #PlayReportZA`;
+    // Footer
+    message += `\nFollow PlayReportZA for more updates! 📲⚽\n#Football #LiveScores #SoccerUpdates #PlayReportZA`;
 
-    // SEND TO FACEBOOK
-    const fbURL = `https://graph.facebook.com/${pageId}/feed?message=${encodeURIComponent(finalMessage)}&access_token=${fbToken}`;
-    const fbResponse = await fetch(fbURL, { method: "POST" });
-    const fbData = await fbResponse.json();
+    // POST TO FACEBOOK
+    const fbUrl =
+      `https://graph.facebook.com/${pageId}/feed?message=${encodeURIComponent(message)}&access_token=${fbToken}`;
+    const fbRes = await fetch(fbUrl, { method: "POST" });
+    const fbData = await fbRes.json();
 
     if (manual) {
-      return jsonResp({
+      return new Response(JSON.stringify({
         status: "POST_SENT",
-        posted_message_preview: finalMessage.slice(0,300),
+        match_count: liveMatches.length + htMatches.length + ftMatches.length,
+        posted_message_preview: message.substring(0, 350),
         facebook_result: fbData
+      }, null, 2), {
+        headers: { "Content-Type": "application/json" }
       });
     }
 
-    return jsonResp({ success: true });
   } catch (err) {
-    return jsonResp({ error: err.message }, 500);
+    return new Response("Error: " + err.message, { status: 500 });
   }
-}
-
-function jsonResp(obj, status = 200) {
-  return new Response(JSON.stringify(obj, null, 2), {
-    status,
-    headers: { "Content-Type": "application/json" }
-  });
-}
-
-function findStat(stats, name) {
-  const s = stats.find(x => x.type === name);
-  return s?.value || null;
-}
-
-function currentSA() {
-  return new Date().toLocaleString("en-ZA", {
-    timeZone: "Africa/Johannesburg",
-    hour: "2-digit",
-    minute: "2-digit",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  });
-        }
+      }
