@@ -159,4 +159,4 @@ async function runAutoposter(env, manual = false) {
   } catch (err) {
     return new Response("Error: " + err.message, { status: 500 });
   }
-}
+                                                  }
