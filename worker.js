@@ -1,160 +1,183 @@
 export default {
   async fetch(request, env) {
-    const API_KEY = env.API_FOOTBALL_KEY;
-    const PAGE_ID = env.FB_PAGE_ID;
-    const ACCESS_TOKEN = env.FB_PAGE_TOKEN;
+    const url = new URL(request.url);
+    const force = url.searchParams.get("force");
+    if (force === "true") {
+      return await runAutoposter(env, true);
+    }
+    return new Response("PlayReportZA autoposter is active.");
+  },
 
-    if (!API_KEY || !PAGE_ID || !ACCESS_TOKEN) {
-      return new Response(JSON.stringify({ error: "Missing environment variables" }), { status: 500 });
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(runAutoposter(env, false));
+  }
+};
+
+// Convert UTC → South African Time (UTC+2)
+function toSA(dateString) {
+  const d = new Date(dateString);
+  return new Date(d.getTime() + (2 * 60 * 60 * 1000));
+}
+
+function formatTimeSA(dateString) {
+  const d = toSA(dateString);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
+async function runAutoposter(env, manual = false) {
+  try {
+    const apiKey = env.API_FOOTBALL_KEY;
+    const fbToken = env.FB_PAGE_TOKEN;
+    const pageId = env.FB_PAGE_ID;
+
+    if (!apiKey || !fbToken || !pageId) {
+      return new Response("Missing environment variables", { status: 500 });
     }
 
-    // Convert to SA time zone  
-    function toSA(time) {
-      return new Date(time).toLocaleString("en-ZA", { timeZone: "Africa/Johannesburg" });
-    }
+    const today = new Date().toISOString().split("T")[0];
 
-    // Format time only (HH:MM)
-    function formatHM(date) {
-      return new Date(date).toLocaleTimeString("en-GB", {
-        hour: "2-digit",
-        minute: "2-digit",
-        timeZone: "Africa/Johannesburg"
-      });
-    }
+    // Fetch all fixtures for today
+    const apiURL = `https://v3.football.api-sports.io/fixtures?date=${today}`;
+    const res = await fetch(apiURL, {
+      headers: { "x-apisports-key": apiKey }
+    });
+    const data = await res.json();
+    if (!data.response) data.response = [];
 
-    // Fetch matches  
-    async function getMatches() {
-      const today = new Date().toISOString().split("T")[0];
-      const url = `https://v3.football.api-sports.io/fixtures?date=${today}`;
-
-      const r = await fetch(url, { headers: { "x-apisports-key": API_KEY } });
-      const data = await r.json();
-      return data.response || [];
-    }
-
-    const matches = await getMatches();
-
-    // Separate live, HT, FT (last 6 hours)
     const now = new Date();
+    const sixHoursAgo = new Date(now.getTime() - (6 * 60 * 60 * 1000));
 
-    const live = [];
-    const halftime = [];
-    const fulltime = [];
+    let liveMatches = [];
+    let htMatches = [];
+    let ftMatches = [];
 
-    for (const m of matches) {
-      const status = m.fixture.status.short;
-      const kickoff = m.fixture.date;
+    for (const f of data.response) {
+      const status = f.fixture.status.short;
+      const gameTime = toSA(f.fixture.date);
 
-      if (status === "1H" || status === "2H" || status === "ET") live.push(m);
-      else if (status === "HT") halftime.push(m);
-      else if (status === "FT") {
-        // Only show last 6 hours
-        const diff = (now - new Date(kickoff)) / 3600000;
-        if (diff <= 6) fulltime.push(m);
+      const leagueName = `${f.league.country} - ${f.league.name}`;
+      const home = f.teams.home.name;
+      const away = f.teams.away.name;
+      const goalsHome = f.goals.home;
+      const goalsAway = f.goals.away;
+
+      // Goal minutes + scorers
+      let goalsList = [];
+      if (f.events) {
+        for (const e of f.events) {
+          if (e.type === "Goal") {
+            goalsList.push(`${e.time.elapsed}' ${e.player.name}`);
+          }
+        }
+      }
+
+      // Corners and possession (if available)
+      let stats = {};
+      if (f.statistics && f.statistics.length >= 2) {
+        const homeStats = f.statistics[0].statistics;
+        const awayStats = f.statistics[1].statistics;
+
+        const corners = homeStats.find(s => s.type === "Corner Kicks")?.value;
+        const cornersAway = awayStats.find(s => s.type === "Corner Kicks")?.value;
+
+        const poss = homeStats.find(s => s.type === "Ball Possession")?.value;
+        const possAway = awayStats.find(s => s.type === "Ball Possession")?.value;
+
+        if (corners != null && cornersAway != null)
+          stats.corners = `${corners}-${cornersAway}`;
+        if (poss != null && possAway != null)
+          stats.possession = `${poss} | ${possAway}`;
+      }
+
+      // Build match object
+      const matchObj = {
+        time: formatTimeSA(f.fixture.date),
+        minute: f.fixture.status.elapsed ? `${f.fixture.status.elapsed}'` : "",
+        league: leagueName,
+        home,
+        away,
+        score: `${goalsHome}–${goalsAway}`,
+        goalsList,
+        stats
+      };
+
+      if (status === "1H" || status === "2H" || status === "ET" || status === "LIVE") {
+        liveMatches.push(matchObj);
+      } else if (status === "HT") {
+        htMatches.push(matchObj);
+      } else if (status === "FT" || status === "AET" || status === "PEN") {
+        if (gameTime >= sixHoursAgo) ftMatches.push(matchObj);
       }
     }
 
-    // Group by league → sort by kickoff
-    function groupAndSort(arr) {
+    // Sort by time inside groups
+    const sortByTime = arr => arr.sort((a, b) => a.time.localeCompare(b.time));
+    sortByTime(liveMatches);
+    sortByTime(htMatches);
+    sortByTime(ftMatches);
+
+    // Group by league
+    function groupByLeague(matches) {
       const groups = {};
-      arr.forEach(m => {
-        const lg = m.league.name;
-        if (!groups[lg]) groups[lg] = [];
-        groups[lg].push(m);
-      });
-
-      Object.keys(groups).forEach(lg => {
-        groups[lg].sort((a, b) => new Date(a.fixture.date) - new Date(b.fixture.date));
-      });
-
+      for (const m of matches) {
+        if (!groups[m.league]) groups[m.league] = [];
+        groups[m.league].push(m);
+      }
       return groups;
     }
 
-    const G_live = groupAndSort(live);
-    const G_ht = groupAndSort(halftime);
-    const G_ft = groupAndSort(fulltime);
+    const liveGrouped = groupByLeague(liveMatches);
+    const htGrouped = groupByLeague(htMatches);
+    const ftGrouped = groupByLeague(ftMatches);
 
-    // Format stats cleanly  
-    function stats(m) {
-      const S = m.statistics;
-      if (!S) return "";
+    // Build message
+    let text = `⚽ *Today's Live Fixtures* \n\n`;
 
-      const team1 = S[0]?.statistics;
-      const team2 = S[1]?.statistics;
-
-      if (!team1 || !team2) return "";
-
-      function stat(name, emoji) {
-        const a = team1.find(x => x.type === name)?.value;
-        const b = team2.find(x => x.type === name)?.value;
-        if (!a || !b) return "";
-        return `${emoji}${a}-${b} `;
+    function buildSection(title, groups, emoji) {
+      let out = `\n${emoji} ${title}\n`;
+      out += `──────────────────────\n`;
+      for (const league in groups) {
+        out += `📍 ${league}\n`;
+        for (const m of groups[league]) {
+          out += `${emoji === "🔴" ? "LIVE🔴" : emoji} ${m.time} | ${m.home} ${m.score} ${m.away}\n`;
+          if (m.goalsList.length > 0) {
+            out += `⚽ Goals: ${m.goalsList.join(", ")}\n`;
+          }
+          if (m.stats.corners) out += `🚩 Corners: ${m.stats.corners}\n`;
+          if (m.stats.possession) out += `🔘 Possession: ${m.stats.possession}\n`;
+        }
+        out += `\n`;
       }
-
-      const corners = stat("Corner Kicks", "🚩");
-      const possession = (() => {
-        const p1 = team1.find(x => x.type === "Ball Possession")?.value;
-        const p2 = team2.find(x => x.type === "Ball Possession")?.value;
-        return p1 && p2 ? `📊 ${p1}-${p2}` : "";
-      })();
-
-      return `${corners}${possession}`.trim();
+      return out;
     }
 
-    // Goals with minutes  
-    function goals(m) {
-      if (!m.events) return "";
-      const g = m.events.filter(e => e.type === "Goal");
-      if (g.length === 0) return "";
-      return g.map(e => `⚽ ${e.time.elapsed}'`).join(" ");
-    }
+    if (liveMatches.length > 0) text += buildSection("Live Matches", liveGrouped, "🔴");
+    if (htMatches.length > 0) text += buildSection("Half Time Results", htGrouped, "⏸️");
+    if (ftMatches.length > 0) text += buildSection("Full Time Results (Last 6 hours)", ftGrouped, "🏁");
 
-    // Format a single match line  
-    function showMatch(m, label) {
-      const home = m.teams.home.name;
-      const away = m.teams.away.name;
-      const score = `${m.goals.home}-${m.goals.away}`;
-      const time = m.fixture.status.elapsed ? `${m.fixture.status.elapsed}'` : formatHM(m.fixture.date);
-      const kickoff = formatHM(m.fixture.date);
+    text += "\n#PlayReportZA #LiveScores #SoccerUpdates";
 
-      const g = goals(m);
-      const s = stats(m);
-
-      return (
-        `${label} | ${kickoff} | ${home} ${score} ${away}\n` +
-        (g ? `${g}\n` : "") +
-        (s ? `${s}\n` : "")
-      );
-    }
-
-    // Build full post  
-    let post = `⚽ Today's Live Fixtures\n\n`;
-
-    function section(title, grouped, label) {
-      if (Object.keys(grouped).length === 0) return;
-      post += `\n${title}\n`;
-      for (const lg in grouped) {
-        post += `\n📍 ${lg}\n`;
-        grouped[lg].forEach(m => {
-          post += showMatch(m, label);
-        });
-      }
-    }
-
-    section("🔴 LIVE MATCHES", G_live, "LIVE 🔴");
-    section("⏸️ HALF-TIME MATCHES", G_ht, "HT ⏸️");
-    section("🏁 FULL-TIME (Last 6h)", G_ft, "FT 🏁");
-
-    // Add hashtags  
-    post += `\n#PlayReportZA #LiveScores #FootballUpdates #SoccerLive #MatchDay`;
-
-    // Post to Facebook  
-    const fbRes = await fetch(
-      `https://graph.facebook.com/${PAGE_ID}/feed?message=${encodeURIComponent(post)}&access_token=${ACCESS_TOKEN}`,
-      { method: "POST" }
-    );
+    // Post to Facebook
+    const fbURL = `https://graph.facebook.com/${pageId}/feed?message=${encodeURIComponent(text)}&access_token=${fbToken}`;
+    const fbRes = await fetch(fbURL, { method: "POST" });
     const fbData = await fbRes.json();
 
-    return new Response(JSON.stringify(fbData, null, 2), { headers: { "Content-Type": "application/json" } });
+    if (manual) {
+      return new Response(JSON.stringify({
+        status: "POST_SENT",
+        match_count: liveMatches.length + htMatches.length + ftMatches.length,
+        preview: text.slice(0, 200),
+        facebook_result: fbData
+      }, null, 2), {
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+
+    return new Response("OK");
+
+  } catch (err) {
+    return new Response("ERROR: " + err.message, { status: 500 });
   }
-};
+      }
