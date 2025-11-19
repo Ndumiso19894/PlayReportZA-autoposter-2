@@ -154,7 +154,7 @@ async function runAutoposter(env, manual = false) {
 // ======================================================
 
 function buildPost(live, ft, others) {
-  let post = `⚽ Today's Live Fixtures (South African Time)⚽\n`;
+  let post = `⚽ Today's Live Fixtures ⚽ (South African Time)\n`;
 
   // LIVE FIRST
   if (Object.keys(live).length > 0) {
@@ -241,9 +241,9 @@ function countryToFlag(country) {
     "Uruguay": "🇺🇾",
     "Venezuela": "🇻🇪",
 
-    "England": "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
-    "Wales": "🏴󠁧󠁢󠁷󠁬󠁳󠁿",
-    "Scotland": "🏴󠁧󠁢󠁳󠁣󠁴󠁿",
+    "England": "🇬🇧",
+    "Wales": "🇬🇧",
+    "Scotland": "🇬🇧",
     "Ireland": "🇮🇪",
 
     "France": "🇫🇷",
