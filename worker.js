@@ -12,6 +12,10 @@ export default {
   }
 };
 
+// ============================================================
+// MAIN AUTPOSTER
+// ============================================================
+
 async function runAutoposter(env, manual = false) {
   const apiKey = env.API_FOOTBALL_KEY;
   const fbToken = env.FB_PAGE_TOKEN;
@@ -40,18 +44,35 @@ async function runAutoposter(env, manual = false) {
   const ft = {};
   const others = [];
 
+  const nowSA = new Date().toLocaleString("en-ZA", {
+    timeZone: "Africa/Johannesburg"
+  });
+  const nowDate = new Date(nowSA);
+
   for (const f of fixtures) {
     const status = f.fixture.status.short;
 
-    // FILTER ONLY LIVE + FT MATCHES
     const isLive = ["1H", "2H", "HT", "ET", "PEN", "LIVE"].includes(status);
     const isFT = ["FT", "AET", "PEN"].includes(status);
 
-    if (!isLive && !isFT) continue; // SKIP everything else
+    if (!isLive && !isFT) continue;
 
     const league = `${f.league.country} - ${f.league.name}`;
-
     const saTime = toSA(f.fixture.date);
+
+    // Full time filtering: last 3 hours only
+    const fixtureDateSA = new Date(
+      new Date(f.fixture.date).toLocaleString("en-ZA", {
+        timeZone: "Africa/Johannesburg"
+      })
+    );
+
+    const timeDiffHours = (nowDate - fixtureDateSA) / (1000 * 60 * 60);
+
+    if (isFT && timeDiffHours > 3) {
+      // skip FT older than 3 hours
+      continue;
+    }
 
     const score =
       f.goals.home !== null && f.goals.away !== null
@@ -67,7 +88,7 @@ async function runAutoposter(env, manual = false) {
         ? `${f.fixture.status.elapsed}'`
         : "";
 
-    // Goal minutes
+    // Goals
     let goals = [];
     if (f.events) {
       f.events.forEach((ev) => {
@@ -78,16 +99,16 @@ async function runAutoposter(env, manual = false) {
     }
     const goalsLine = goals.length ? `⚽ Goals: ${goals.join(", ")}` : "";
 
-    // STATS FOR LIVE ONLY
+    // Stats (LIVE only)
     let stats = "";
     if (isLive && f.statistics?.length > 1) {
-      const homeStats = f.statistics[0].statistics;
-      const awayStats = f.statistics[1].statistics;
+      const home = f.statistics[0].statistics || [];
+      const away = f.statistics[1].statistics || [];
 
-      const cornersHome = findStat(homeStats, "Corner Kicks");
-      const cornersAway = findStat(awayStats, "Corner Kicks");
-      const posHome = findStat(homeStats, "Ball Possession");
-      const posAway = findStat(awayStats, "Ball Possession");
+      const cornersHome = findStat(home, "Corner Kicks");
+      const cornersAway = findStat(away, "Corner Kicks");
+      const posHome = findStat(home, "Ball Possession");
+      const posAway = findStat(away, "Ball Possession");
 
       const corners =
         cornersHome && cornersAway ? `🚩 Corners: ${cornersHome}–${cornersAway}` : "";
@@ -103,7 +124,6 @@ async function runAutoposter(env, manual = false) {
       (goalsLine ? `\n${goalsLine}` : "") +
       (stats && isLive ? `\n${stats}` : "");
 
-    // GROUPING
     if (isLive) {
       if (!live[league]) live[league] = [];
       live[league].push({ time: saTime, text: line });
@@ -118,7 +138,9 @@ async function runAutoposter(env, manual = false) {
   const post = buildPost(live, ft, others);
 
   const fbURL =
-    `https://graph.facebook.com/${pageId}/feed?message=${encodeURIComponent(post)}&access_token=${fbToken}`;
+    `https://graph.facebook.com/${pageId}/feed?message=${encodeURIComponent(
+      post
+    )}&access_token=${fbToken}`;
 
   const fbResponse = await fetch(fbURL, { method: "POST" });
   const fbData = await fbResponse.json();
@@ -141,7 +163,9 @@ async function runAutoposter(env, manual = false) {
   return new Response("OK");
 }
 
-// ------------------ BUILD POST --------------------
+// ============================================================
+// BUILD POST
+// ============================================================
 
 function buildPost(live, ft, others) {
   let post = `⚽ Today's Live Fixtures (SA Time)\n`;
@@ -156,31 +180,34 @@ function buildPost(live, ft, others) {
     }
   }
 
-  // CHANNEL BREAK MESSAGE
-  post += `\n━━━━━━━━━━━━━━━━━━━━\n📣 Follow PlayReportZA for instant live score updates!Please follow the page and like👍❤️\n━━━━━━━━━━━━━━━━━━━━\n`;
+  // Channel promo
+  post += `\n━━━━━━━━━━━━━━━━━━━━\n📣 Follow PlayReportZA for instant live updates!\n━━━━━━━━━━━━━━━━━━━━\n`;
 
-  // FT RESULTS
+  // FULL TIME — descending order
   if (Object.keys(ft).length > 0) {
-    post += `\n🟢 Full-Time Results\n`;
+    post += `\n🟢 Full-Time Results (Last 3 Hours)\n`;
     for (const league of Object.keys(ft)) {
       if (ft[league].length === 0) continue;
-      const sorted = ft[league].sort((a, b) => a.time.localeCompare(b.time));
+      const sorted = ft[league].sort((a, b) => b.time.localeCompare(a.time)); // DESCENDING
       post += `\n📍 ${league}\n${sorted.map((m) => m.text).join("\n")}\n`;
     }
   }
 
-  // OTHERS
+  // Others
   if (others.length > 0) {
-    post += `\n📦 *Others*\n${others.join("\n")}\n`;
+    post += `\n📦 Others\n${others.join("\n")}\n`;
   }
 
-  // HASHTAGS
-  post += `\n#LiveScores #Football #SoccerLive #ScoreUpdate #Matchday #FTResults #LiveMatchTracker #GlobalFootball #SportsUpdates #PlayReportZA`;
+  // Hashtags  
+  post +=
+    `\n#LiveScores #Football #SoccerLive #ScoreUpdate #FTResults #SportsUpdates #GlobalFootball #SoccerFans #MatchDay #PlayReportZA`;
 
   return post.trim();
 }
 
-// ----------------- HELPERS --------------------
+// ============================================================
+// HELPERS
+// ============================================================
 
 function toSA(utc) {
   return new Date(utc).toLocaleTimeString("en-ZA", {
@@ -196,9 +223,12 @@ function findStat(arr, name) {
 }
 
 async function fetchFixtures(date, apiKey) {
-  const res = await fetch(`https://v3.football.api-sports.io/fixtures?date=${date}`, {
-    headers: { "x-apisports-key": apiKey }
-  });
+  const res = await fetch(
+    `https://v3.football.api-sports.io/fixtures?date=${date}`,
+    {
+      headers: { "x-apisports-key": apiKey }
+    }
+  );
   const data = await res.json();
   return data.response || [];
-      }
+        }
