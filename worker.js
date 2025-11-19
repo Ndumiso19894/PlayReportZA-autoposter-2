@@ -12,7 +12,9 @@ export default {
   }
 };
 
-// ============================= MAIN FUNCTION =============================
+// ======================================================
+// ⚽ MAIN AUTPOSTER
+// ======================================================
 
 async function runAutoposter(env, manual = false) {
   const apiKey = env.API_FOOTBALL_KEY;
@@ -32,82 +34,103 @@ async function runAutoposter(env, manual = false) {
   const fixtures = await fetchFixtures(today, apiKey);
 
   const live = {};
-  const ht = {};
   const ft = {};
   const others = [];
 
   for (const f of fixtures) {
     const status = f.fixture.status.short;
 
-    const isLive = ["1H", "2H", "ET", "PEN", "LIVE"].includes(status);
-    const isHT = status === "HT";
-    const isFT = ["FT", "AET"].includes(status);
+    const isLive = ["1H", "2H", "HT", "ET", "PEN", "LIVE"].includes(status);
+    const isFT = ["FT", "AET", "PEN"].includes(status);
 
-    if (!isLive && !isHT && !isFT) continue;
+    if (!isLive && !isFT) continue;
 
-    const league = `${getFlag(f.league.country)} ${f.league.country} - ${f.league.name}`;
+    const country = f.league.country || "Others";
+    const league = f.league.name || "Unknown League";
+    const flag = countryToFlag(country);
+
+    const leagueKey = `${flag} ${country} - ${league}`;
 
     const saTime = toSA(f.fixture.date);
-    const score = formatScoreBoxes(f.goals.home, f.goals.away);
 
-    const minute = isFT
-      ? "FT"
-      : isHT
-      ? "HT"
-      : f.fixture.status.elapsed
-      ? `${f.fixture.status.elapsed}'`
-      : "";
+    // SCORE COLOR BOXES
+    let scoreBox = "";
+    if (f.goals.home !== null && f.goals.away !== null) {
+      const h = f.goals.home;
+      const a = f.goals.away;
 
-    // ================= GOAL MINUTES + SCORERS =================
-    let goals = [];
+      const homeBox =
+        h > a ? `🟦 ${h}` : h < a ? `🟥 ${h}` : `⬜ ${h}`;
+      const awayBox =
+        a > h ? `🟦 ${a}` : a < h ? `🟥 ${a}` : `⬜ ${a}`;
+
+      scoreBox = `${homeBox} - ${awayBox}`;
+    }
+
+    const minute =
+      status === "FT"
+        ? "FT"
+        : status === "HT"
+        ? "HT"
+        : f.fixture.status.elapsed
+        ? `${f.fixture.status.elapsed}'`
+        : "";
+
+    // Goals + scorers
+    let goalLines = [];
     if (f.events) {
       f.events.forEach(ev => {
         if (ev.type === "Goal" && ev.time?.elapsed) {
-          const scorer = ev.player?.name || "";
-          goals.push(`⚽ ${ev.time.elapsed}' ${scorer}`);
+          const who =
+            ev.player?.name
+              ? `${ev.player.name}`
+              : "Unknown player";
+
+          goalLines.push(`⚽ ${ev.time.elapsed}' — ${who}`);
         }
       });
     }
+    const goalsSection = goalLines.length ? goalLines.join("\n") : "";
 
-    const goalsLine = goals.length ? goals.join("\n") : "";
-
-    // ================= LIVE STATS =================
+    // Stats (LIVE only)
     let stats = "";
-    if (!isFT && f.statistics?.length > 1) {
-      const home = f.statistics[0].statistics;
-      const away = f.statistics[1].statistics;
+    if (isLive && f.statistics?.length > 1) {
+      const homeStats = f.statistics[0].statistics;
+      const awayStats = f.statistics[1].statistics;
 
-      const corners = numPair(home, away, "Corner Kicks", "🚩 Corners");
-      const possession = numPair(home, away, "Ball Possession", "📊 Possession");
+      const cH = findStat(homeStats, "Corner Kicks");
+      const cA = findStat(awayStats, "Corner Kicks");
+      const pH = findStat(homeStats, "Ball Possession");
+      const pA = findStat(awayStats, "Ball Possession");
+
+      const corners =
+        cH && cA ? `🚩 Corners: ${cH}–${cA}` : "";
+      const possession =
+        pH && pA ? `📊 Possession: ${pH}–${pA}` : "";
 
       stats = [corners, possession].filter(Boolean).join("\n");
     }
 
-    const derby = isDerby(f.teams.home.name, f.teams.away.name)
-      ? "🔥 Derby Match"
-      : "";
-
+    // FULL MATCH LINE
     const line =
-      `⏱ ${saTime} | ${f.teams.home.name} ${score} ${f.teams.away.name} (${minute})` +
-      (derby ? `\n${derby}` : "") +
-      (goalsLine ? `\n${goalsLine}` : "") +
-      (stats && !isFT ? `\n${stats}` : "");
+      `⏱ ${saTime} • ${f.teams.home.name} ${scoreBox} ${f.teams.away.name}` +
+      (minute ? ` (${minute})` : "") +
+      (goalsSection ? `\n${goalsSection}` : "") +
+      (stats && isLive ? `\n${stats}` : "");
 
+    // GROUPING
     if (isLive) {
-      if (!live[league]) live[league] = [];
-      live[league].push({ time: saTime, text: line });
-    } else if (isHT) {
-      if (!ht[league]) ht[league] = [];
-      ht[league].push({ time: saTime, text: line });
+      if (!live[leagueKey]) live[leagueKey] = [];
+      live[leagueKey].push({ time: saTime, text: line });
     } else if (isFT) {
-      if (!ft[league]) ft[league] = [];
-      ft[league].push({ time: saTime, text: line.replace(/\n.*/g, "") });
+      if (!ft[leagueKey]) ft[leagueKey] = [];
+      ft[leagueKey].push({ time: saTime, text: line.replace(/\n.*/g, "") });
     } else {
       others.push(line);
     }
   }
 
-  const post = buildPost(live, ht, ft, others);
+  const post = buildPost(live, ft, others);
 
   const fbURL =
     `https://graph.facebook.com/${pageId}/feed?message=${encodeURIComponent(post)}&access_token=${fbToken}`;
@@ -118,7 +141,7 @@ async function runAutoposter(env, manual = false) {
   if (manual) {
     return new Response(JSON.stringify({
       status: "POST_SENT",
-      posted_message_preview: post.slice(0, 200),
+      posted_message_preview: post.slice(0, 350),
       facebook_result: fbData
     }, null, 2), { headers: { "Content-Type": "application/json" } });
   }
@@ -126,93 +149,49 @@ async function runAutoposter(env, manual = false) {
   return new Response("OK");
 }
 
-// ============================= BUILD POST =============================
+// ======================================================
+// POST BUILDER
+// ======================================================
 
-function buildPost(live, ht, ft, others) {
-  let post = `⚽ *Today's Live Fixtures* (SA Time)\n`;
+function buildPost(live, ft, others) {
+  let post = `⚽ *Today's Live Fixtures* (South African Time)\n`;
 
-  // LIVE
+  // LIVE FIRST
   if (Object.keys(live).length > 0) {
-    post += `\n🔴 LIVE MATCHES\n`;
+    post += `\n🔴 *LIVE MATCHES*\n`;
     for (const league of Object.keys(live)) {
+      if (live[league].length === 0) continue;
       const sorted = live[league].sort((a, b) => a.time.localeCompare(b.time));
-      post += `\n📍 ${league}\n${sorted.map(x => x.text).join("\n")}\n`;
+      post += `\n${league}\n${sorted.map(m => m.text).join("\n")}\n`;
     }
   }
 
-  // HT
-  if (Object.keys(ht).length > 0) {
-    post += `\n🟡 HALF TIME\n`;
-    for (const league of Object.keys(ht)) {
-      const sorted = ht[league].sort((a, b) => a.time.localeCompare(b.time));
-      post += `\n📍 ${league}\n${sorted.map(x => x.text).join("\n")}\n`;
-    }
-  }
+  // BREAK MESSAGE
+  post += `\n━━━━━━━━━━━━━━━━━━\n📣 Follow PlayReportZA for the fastest live updates ❤️🔥\n━━━━━━━━━━━━━━━━━━\n`;
 
-  // BREAK
-  post += `\n━━━━━━━━━━━━━━━━━━━━\n📣 Follow PlayReportZA for instant live score updates!\n━━━━━━━━━━━━━━━━━━━━\n`;
-
-  // FT DESCENDING ORDER
+  // FULL TIME (DESCENDING)
   if (Object.keys(ft).length > 0) {
-    post += `\n🟢 FULL TIME RESULTS\n`;
+    post += `\n🟢 *FULL-TIME RESULTS*\n`;
     for (const league of Object.keys(ft)) {
       const sorted = ft[league].sort((a, b) => b.time.localeCompare(a.time)); // DESCENDING
-      post += `\n📍 ${league}\n${sorted.map(x => x.text).join("\n")}\n`;
+      post += `\n${league}\n${sorted.map(m => m.text).join("\n")}\n`;
     }
   }
 
-  // OTHERS FALLBACK
+  // OTHERS
   if (others.length > 0) {
-    post += `\n📦 Others\n${others.join("\n")}\n`;
+    post += `\n📦 *Others*\n${others.join("\n")}\n`;
   }
 
-  // HASHTAGS (20 mixed)
-  post +=
-    `\n#LiveScores #FootballUpdates #SoccerLive #PlayReportZA #GoalAlert #MatchDay #WorldFootball #SportsLive #AfricaFootball #GlobalScores #LiveMatchTracker #ScoreUpdate #FootballAction #BreakingSports #GoalScorers #FullTimeResults #HalfTimeScores #LiveFixtures #SoccerStats #DailyFootball`;
+  // HASHTAGS
+  post += `\n#LiveScores #ScoreZone #FootballUpdates #SoccerLive #MatchDay #FTResults #PlayReportZA #SportsNews #GoalUpdate #WorldwideFootball #TrendingFootball #ScoreUpdates #FootballFeed #SoccerStats #DailyFootball`;
 
   return post.trim();
 }
 
-// ============================= HELPERS =============================
-
-function formatScoreBoxes(h, a) {
-  if (h === null || a === null) return "";
-  const winner = h > a ? "home" : a > h ? "away" : "draw";
-
-  const box = (num, type) =>
-    type === "win" ? `🟦${num}🟦` :
-    type === "lose" ? `🟥${num}🟥` :
-    `⬜${num}⬜`;
-
-  return `${box(h, winner === "home" ? "win" : winner === "away" ? "lose" : "draw")}–${box(a, winner === "away" ? "win" : winner === "home" ? "lose" : "draw")}`;
-}
-
-function numPair(h, a, field, label) {
-  const v1 = h.find(x => x.type === field)?.value;
-  const v2 = a.find(x => x.type === field)?.value;
-  if (!v1 || !v2) return "";
-  return `${label}: ${v1}–${v2}`;
-}
-
-function isDerby(h, a) {
-  return h.split(" ")[0] === a.split(" ")[0];
-}
-
-function getFlag(country) {
-  const map = {
-    "South Africa": "🇿🇦",
-    "England": "🏴",
-    "France": "🇫🇷",
-    "Spain": "🇪🇸",
-    "Germany": "🇩🇪",
-    "Italy": "🇮🇹",
-    "Portugal": "🇵🇹",
-    "Netherlands": "🇳🇱",
-    "Argentina": "🇦🇷",
-    "Brazil": "🇧🇷"
-  };
-  return map[country] || "🌍";
-}
+// ======================================================
+// HELPERS
+// ======================================================
 
 function toSA(utc) {
   return new Date(utc).toLocaleTimeString("en-ZA", {
@@ -222,6 +201,11 @@ function toSA(utc) {
   });
 }
 
+function findStat(arr, name) {
+  const s = arr.find(x => x.type === name);
+  return s?.value || null;
+}
+
 async function fetchFixtures(date, apiKey) {
   const res = await fetch(`https://v3.football.api-sports.io/fixtures?date=${date}`, {
     headers: { "x-apisports-key": apiKey }
@@ -229,3 +213,81 @@ async function fetchFixtures(date, apiKey) {
   const data = await res.json();
   return data.response || [];
 }
+
+// ======================================================
+// COUNTRY FLAG DETECTOR
+// ======================================================
+
+function countryToFlag(country) {
+  if (!country) return "🌍";
+
+  const map = {
+    "World": "🌍",
+    "International": "🌍",
+    "Europe": "🌍",
+    "Africa": "🌍",
+    "Asia": "🌏",
+    "South America": "🌎",
+    "North America": "🌎",
+
+    "Argentina": "🇦🇷",
+    "Bolivia": "🇧🇴",
+    "Brazil": "🇧🇷",
+    "Chile": "🇨🇱",
+    "Colombia": "🇨🇴",
+    "Ecuador": "🇪🇨",
+    "Paraguay": "🇵🇾",
+    "Peru": "🇵🇪",
+    "Uruguay": "🇺🇾",
+    "Venezuela": "🇻🇪",
+
+    "England": "🏴",
+    "Wales": "🏴",
+    "Scotland": "🏴",
+    "Ireland": "🇮🇪",
+
+    "France": "🇫🇷",
+    "Germany": "🇩🇪",
+    "Spain": "🇪🇸",
+    "Portugal": "🇵🇹",
+    "Italy": "🇮🇹",
+    "Belgium": "🇧🇪",
+    "Netherlands": "🇳🇱",
+    "Sweden": "🇸🇪",
+    "Norway": "🇳🇴",
+    "Denmark": "🇩🇰",
+    "Finland": "🇫🇮",
+    "Iceland": "🇮🇸",
+    "Ukraine": "🇺🇦",
+    "Poland": "🇵🇱",
+    "Serbia": "🇷🇸",
+    "Greece": "🇬🇷",
+    "Turkey": "🇹🇷",
+    "Austria": "🇦🇹",
+    "Czechia": "🇨🇿",
+    "Romania": "🇷🇴",
+    "Croatia": "🇭🇷",
+    "Slovenia": "🇸🇮",
+
+    "USA": "🇺🇸",
+    "Canada": "🇨🇦",
+    "Mexico": "🇲🇽",
+
+    "Japan": "🇯🇵",
+    "South Korea": "🇰🇷",
+
+    "South Africa": "🇿🇦",
+    "Nigeria": "🇳🇬",
+    "Ghana": "🇬🇭",
+    "Egypt": "🇪🇬",
+    "Morocco": "🇲🇦",
+  };
+
+  if (map[country]) return map[country];
+
+  for (const key of Object.keys(map)) {
+    if (country.includes(key)) return map[key];
+  }
+
+  return "🌍";
+        }
