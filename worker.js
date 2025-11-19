@@ -18,19 +18,12 @@ async function runAutoposter(env, manual = false) {
   const pageId = env.FB_PAGE_ID;
 
   if (!apiKey || !fbToken || !pageId) {
-    return new Response(
-      JSON.stringify(
-        {
-          error: "Missing environment variables",
-          apiKey: !!apiKey,
-          fbToken: !!fbToken,
-          pageId: !!pageId
-        },
-        null,
-        2
-      ),
-      { status: 500, headers: { "Content-Type": "application/json" } }
-    );
+    return new Response(JSON.stringify({
+      error: "Missing environment variables",
+      apiKey: !!apiKey,
+      fbToken: !!fbToken,
+      pageId: !!pageId
+    }, null, 2), { status: 500 });
   }
 
   const today = new Date().toISOString().split("T")[0];
@@ -43,75 +36,90 @@ async function runAutoposter(env, manual = false) {
   for (const f of fixtures) {
     const status = f.fixture.status.short;
 
-    // FILTER ONLY LIVE + FT MATCHES
-    const isLive = ["1H", "2H", "HT", "ET", "PEN", "LIVE"].includes(status);
-    const isFT = ["FT", "AET", "PEN"].includes(status);
+    const isLive = ["1H","2H","HT","ET","PEN","LIVE"].includes(status);
+    const isFT = ["FT","AET","PEN"].includes(status);
 
-    if (!isLive && !isFT) continue; // SKIP everything else
+    if (!isLive && !isFT) continue;
 
     const league = `${f.league.country} - ${f.league.name}`;
-
     const saTime = toSA(f.fixture.date);
 
+    const home = f.goals.home;
+    const away = f.goals.away;
+
     const score =
-      f.goals.home !== null && f.goals.away !== null
-        ? `${f.goals.home}–${f.goals.away}`
-        : "";
+      home !== null && away !== null ? `${home}–${away}` : "";
 
     const minute =
-      status === "FT"
-        ? "FT"
-        : status === "HT"
-        ? "HT"
-        : f.fixture.status.elapsed
-        ? `${f.fixture.status.elapsed}'`
-        : "";
+      status === "FT" ? "FT" :
+      status === "HT" ? "HT" :
+      f.fixture.status.elapsed ? `${f.fixture.status.elapsed}'` : "";
 
     // Goal minutes
     let goals = [];
     if (f.events) {
-      f.events.forEach((ev) => {
+      for (const ev of f.events) {
         if (ev.type === "Goal" && ev.time?.elapsed) {
           goals.push(`${ev.time.elapsed}'`);
         }
-      });
+      }
     }
+
     const goalsLine = goals.length ? `⚽ Goals: ${goals.join(", ")}` : "";
 
-    // STATS FOR LIVE ONLY
+    // Stats for LIVE only
     let stats = "";
     if (isLive && f.statistics?.length > 1) {
       const homeStats = f.statistics[0].statistics;
       const awayStats = f.statistics[1].statistics;
 
-      const cornersHome = findStat(homeStats, "Corner Kicks");
-      const cornersAway = findStat(awayStats, "Corner Kicks");
-      const posHome = findStat(homeStats, "Ball Possession");
-      const posAway = findStat(awayStats, "Ball Possession");
+      const cH = findStat(homeStats, "Corner Kicks");
+      const cA = findStat(awayStats, "Corner Kicks");
+      const pH = findStat(homeStats, "Ball Possession");
+      const pA = findStat(awayStats, "Ball Possession");
 
-      const corners =
-        cornersHome && cornersAway ? `🚩 Corners: ${cornersHome}–${cornersAway}` : "";
-      const possession =
-        posHome && posAway ? `📊 Possession: ${posHome}–${posAway}` : "";
+      const corners = cH && cA ? `🚩 Corners: ${cH}–${cA}` : "";
+      const pos = pH && pA ? `📊 Possession: ${pH}–${pA}` : "";
 
-      stats = [corners, possession].filter(Boolean).join("\n");
+      stats = [corners, pos].filter(Boolean).join("\n");
     }
 
-    const line =
+    // --------------------------------------------------------
+    // ★ FT SCORE COLOR BOXES ★
+    // --------------------------------------------------------
+    let homeBox = "", awayBox = "";
+
+    if (isFT && home !== null && away !== null) {
+      if (home > away) {
+        homeBox = `🟦${home}`;
+        awayBox = `🟥${away}`;
+      } else if (away > home) {
+        homeBox = `🟥${home}`;
+        awayBox = `🟦${away}`;
+      } else {
+        homeBox = `⬜${home}`;
+        awayBox = `⬜${away}`;
+      }
+    }
+
+    const liveLine =
       `⏱ ${saTime} | ${f.teams.home.name} ${score} ${f.teams.away.name}` +
       (minute ? ` (${minute})` : "") +
       (goalsLine ? `\n${goalsLine}` : "") +
       (stats && isLive ? `\n${stats}` : "");
 
-    // GROUPING
+    const ftLine =
+      `⏱ ${saTime} | ${f.teams.home.name} ${homeBox} ${awayBox} ${f.teams.away.name}` +
+      (goalsLine ? `\n${goalsLine}` : "");
+
     if (isLive) {
       if (!live[league]) live[league] = [];
-      live[league].push({ time: saTime, text: line });
+      live[league].push({ time: saTime, text: liveLine });
     } else if (isFT) {
       if (!ft[league]) ft[league] = [];
-      ft[league].push({ time: saTime, text: line.replace(/\n.*/g, "") });
+      ft[league].push({ time: saTime, text: ftLine });
     } else {
-      others.push(line);
+      others.push(liveLine);
     }
   }
 
@@ -124,63 +132,51 @@ async function runAutoposter(env, manual = false) {
   const fbData = await fbResponse.json();
 
   if (manual) {
-    return new Response(
-      JSON.stringify(
-        {
-          status: "POST_SENT",
-          posted_message_preview: post.slice(0, 250),
-          facebook_result: fbData
-        },
-        null,
-        2
-      ),
-      { headers: { "Content-Type": "application/json" } }
-    );
+    return new Response(JSON.stringify({
+      status: "POST_SENT",
+      preview: post.slice(0, 300),
+      facebook_result: fbData
+    }, null, 2), { headers: { "Content-Type": "application/json" } });
   }
 
   return new Response("OK");
 }
 
-// ------------------ BUILD POST --------------------
+// ---------------------------------------------------
 
 function buildPost(live, ft, others) {
-  let post = `⚽ Today's Live Fixtures (SA Time)\n`;
+  let post = `⚽ Live Matches (SAST)\n`;
 
   // LIVE
   if (Object.keys(live).length > 0) {
-    post += `\n🔴 Live Matches\n`;
+    post += `\n🔴 LIVE MATCHES\n`;
     for (const league of Object.keys(live)) {
       if (live[league].length === 0) continue;
-      const sorted = live[league].sort((a, b) => a.time.localeCompare(b.time));
-      post += `\n📍 ${league}\n${sorted.map((m) => m.text).join("\n")}\n`;
+      const sorted = live[league].sort((a,b)=>a.time.localeCompare(b.time));
+      post += `\n📍 ${league}\n${sorted.map(m=>m.text).join("\n")}\n`;
     }
   }
 
-  // CHANNEL BREAK MESSAGE
-  post += `\n━━━━━━━━━━━━━━━━━━━━\n📣 Follow PlayReportZA for instant live score updates!Please follow the page and like👍❤️\n━━━━━━━━━━━━━━━━━━━━\n`;
+  post += `\n━━━━━━━━━━━━━━━━━━━━\n📣 Follow PlayReportZA for instant live score updates! ❤️⚽\n━━━━━━━━━━━━━━━━━━━━\n`;
 
-  // FT RESULTS
+  // FULL TIME — SORT MOST RECENT FIRST
   if (Object.keys(ft).length > 0) {
-    post += `\n🟢 Full-Time Results\n`;
+    post += `\n🟢 FULL-TIME RESULTS\n`;
     for (const league of Object.keys(ft)) {
       if (ft[league].length === 0) continue;
-      const sorted = ft[league].sort((a, b) => a.time.localeCompare(b.time));
-      post += `\n📍 ${league}\n${sorted.map((m) => m.text).join("\n")}\n`;
+      const sorted = ft[league].sort((a,b)=>b.time.localeCompare(a.time));
+      post += `\n📍 ${league}\n${sorted.map(m=>m.text).join("\n")}\n`;
     }
   }
 
-  // OTHERS
-  if (others.length > 0) {
-    post += `\n📦 *Others*\n${others.join("\n")}\n`;
-  }
-
-  // HASHTAGS
-  post += `\n#LiveScores #Football #SoccerLive #ScoreUpdate #Matchday #FTResults #LiveMatchTracker #GlobalFootball #SportsUpdates #PlayReportZA`;
+  post += `\n#LiveScores #Football #Soccer #Matchday #FTResults #Football #Soccer #LiveScores #MatchDay #GoalAlert #ScoreUpdate #InPlay #FootballLive 
+#SoccerUpdates #FTResults #SportsNews #FootballCommunity #GlobalFootball #PSL 
+#TrendingMatch #InternationalFootball #SportsHighlights #PlayReportZA #LiveMatchTracker #VarsityCup #GlobalFootball #PlayReportZA`;
 
   return post.trim();
 }
 
-// ----------------- HELPERS --------------------
+// ---------------------------------------------------
 
 function toSA(utc) {
   return new Date(utc).toLocaleTimeString("en-ZA", {
@@ -191,7 +187,7 @@ function toSA(utc) {
 }
 
 function findStat(arr, name) {
-  const s = arr.find((x) => x.type === name);
+  const s = arr.find(x=>x.type === name);
   return s?.value || null;
 }
 
@@ -201,4 +197,4 @@ async function fetchFixtures(date, apiKey) {
   });
   const data = await res.json();
   return data.response || [];
-      }
+  }
