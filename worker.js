@@ -159,15 +159,14 @@ function buildPost(live, ft, others) {
 
   post += `\n━━━━━━━━━━━━━━━━━━━━\n📣 Follow PlayReportZA for instant live score updates! ❤️⚽\n━━━━━━━━━━━━━━━━━━━━\n`;
 
-  // FULL TIME — SORT MOST RECENT FIRST
-  if (Object.keys(ft).length > 0) {
-    post += `\n🟢 FULL-TIME RESULTS\n`;
-    for (const league of Object.keys(ft)) {
-      if (ft[league].length === 0) continue;
-      const sorted = ft[league].sort((a,b)=>b.time.localeCompare(a.time));
-      post += `\n📍 ${league}\n${sorted.map(m=>m.text).join("\n")}\n`;
-    }
+  // FULL-TIME (LATEST FIRST)
+if (Object.keys(ft).length > 0) {
+  post += `\n🟢 FULL-TIME RESULTS\n`;
+  for (const league of Object.keys(ft)) {
+    const sorted = ft[league].sort((a, b) => b.time.localeCompare(a.time)); // FIXED
+    post += `\n📍 ${league}\n${sorted.map(m => m.text.replace(/\n.*/g, "")).join("\n")}\n`;
   }
+}
 
   post += `\n#LiveScores #Football #Soccer #Matchday #FTResults #Football #Soccer #LiveScores #MatchDay #GoalAlert #ScoreUpdate #InPlay #FootballLive 
 #SoccerUpdates #FTResults #SportsNews #FootballCommunity #GlobalFootball #PSL 
