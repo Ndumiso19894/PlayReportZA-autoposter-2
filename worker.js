@@ -144,11 +144,11 @@ async function runAutoposter(env, manual = false) {
 // ------------------ BUILD POST --------------------
 
 function buildPost(live, ft, others) {
-  let post = `⚽ *Today's Live Fixtures (SA Time)*\n`;
+  let post = `⚽ Today's Live Fixtures (SA Time)\n`;
 
   // LIVE
   if (Object.keys(live).length > 0) {
-    post += `\n🔴 *Live Matches*\n`;
+    post += `\n🔴 Live Matches\n`;
     for (const league of Object.keys(live)) {
       if (live[league].length === 0) continue;
       const sorted = live[league].sort((a, b) => a.time.localeCompare(b.time));
@@ -157,11 +157,11 @@ function buildPost(live, ft, others) {
   }
 
   // CHANNEL BREAK MESSAGE
-  post += `\n━━━━━━━━━━━━━━━━━━━━\n📣 *Follow PlayReportZA for instant live score updates!*\n━━━━━━━━━━━━━━━━━━━━\n`;
+  post += `\n━━━━━━━━━━━━━━━━━━━━\n📣 Follow PlayReportZA for instant live score updates!Please follow the page and like👍❤️\n━━━━━━━━━━━━━━━━━━━━\n`;
 
   // FT RESULTS
   if (Object.keys(ft).length > 0) {
-    post += `\n🟢 *Full-Time Results*\n`;
+    post += `\n🟢 Full-Time Results\n`;
     for (const league of Object.keys(ft)) {
       if (ft[league].length === 0) continue;
       const sorted = ft[league].sort((a, b) => a.time.localeCompare(b.time));
