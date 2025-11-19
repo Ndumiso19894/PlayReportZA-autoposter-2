@@ -152,7 +152,7 @@ function buildPost(live, ft, others) {
     post += `\n🔴 LIVE MATCHES\n`;
     for (const league of Object.keys(live)) {
       if (live[league].length === 0) continue;
-      const sorted = live[league].sort((a,b)=>a.time.localeCompare(b.time));
+      const sorted = live[league].sort((a,b)=>b.time.localeCompare(a.time));
       post += `\n📍 ${league}\n${sorted.map(m=>m.text).join("\n")}\n`;
     }
   }
