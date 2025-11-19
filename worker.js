@@ -154,7 +154,7 @@ async function runAutoposter(env, manual = false) {
 // ======================================================
 
 function buildPost(live, ft, others) {
-  let post = `⚽ Today's Live Fixtures (South African Time)\n`;
+  let post = `⚽ Today's Live Fixtures (South African Time)⚽\n`;
 
   // LIVE FIRST
   if (Object.keys(live).length > 0) {
@@ -171,7 +171,7 @@ function buildPost(live, ft, others) {
 
   // FULL TIME (DESCENDING)
   if (Object.keys(ft).length > 0) {
-    post += `\n🟢 *FULL-TIME RESULTS*\n`;
+    post += `\n🟢 FULL-TIME RESULTS💯\n`;
     for (const league of Object.keys(ft)) {
       const sorted = ft[league].sort((a, b) => b.time.localeCompare(a.time)); // DESCENDING
       post += `\n${league}\n${sorted.map(m => m.text).join("\n")}\n`;
@@ -241,9 +241,9 @@ function countryToFlag(country) {
     "Uruguay": "🇺🇾",
     "Venezuela": "🇻🇪",
 
-    "England": "🏴",
-    "Wales": "🏴",
-    "Scotland": "🏴",
+    "England": "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
+    "Wales": "🏴󠁧󠁢󠁷󠁬󠁳󠁿",
+    "Scotland": "🏴󠁧󠁢󠁳󠁣󠁴󠁿",
     "Ireland": "🇮🇪",
 
     "France": "🇫🇷",
