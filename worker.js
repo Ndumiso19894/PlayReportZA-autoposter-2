@@ -60,9 +60,9 @@ async function runAutoposter(env, manual = false) {
       const a = f.goals.away;
 
       const homeBox =
-        h > a ? `🟦 ${h}` : h < a ? `🟥 ${h}` : `⬜ ${h}`;
+        h > a ? `✌️ ${h}` : h < a ? ❌ ${h}` : `🤝 ${h}`;
       const awayBox =
-        a > h ? `🟦 ${a}` : a < h ? `🟥 ${a}` : `⬜ ${a}`;
+        a > h ? `✌️ ${a}` : a < h ? `❌ ${a}` : `🤝 ${a}`;
 
       scoreBox = `${homeBox} - ${awayBox}`;
     }
@@ -154,11 +154,11 @@ async function runAutoposter(env, manual = false) {
 // ======================================================
 
 function buildPost(live, ft, others) {
-  let post = `⚽ *Today's Live Fixtures* (South African Time)\n`;
+  let post = `⚽ Today's Live Fixtures (South African Time)\n`;
 
   // LIVE FIRST
   if (Object.keys(live).length > 0) {
-    post += `\n🔴 *LIVE MATCHES*\n`;
+    post += `\n🔴 LIVE MATCHES\n`;
     for (const league of Object.keys(live)) {
       if (live[league].length === 0) continue;
       const sorted = live[league].sort((a, b) => a.time.localeCompare(b.time));
