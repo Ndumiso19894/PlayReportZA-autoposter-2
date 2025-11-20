@@ -110,7 +110,7 @@ async function runAutoposter(env, manual = false) {
 // =============================== POST BUILDER ==================================
 
 function buildPost(live, ft) {
-  let post = `⚽ *Today's Live Football Fixtures*\n`;
+  let post = `⚽ Today's Live Football Fixtures ⚽\n`;
 
   // LIVE
   post += `\n🔴 LIVE MATCHES\n`;
@@ -132,9 +132,7 @@ function buildPost(live, ft) {
 
   // HASHTAGS
   post += `
-#Football #LiveScores #SoccerUpdates #MatchDay #ScoreUpdate #FullTime #GoalAlert #SportsNews #WorldFootball #PlayReportZA  
-#LiveMatchTracker #InstantScores #SoccerFans #InternationalFootball #LeagueUpdates #LiveSports #FootballStats #UEFAChampionsLeague
-#EuropaLeague #ConferenceLeague #PremierLeague #LaLiga #SerieA #Bundesliga #Ligue1 #Eredivisie #MLS #AFCON #CAFChampionsLeague #FIFAWorldCup #UCLNight #CopaLibertadores #EuropaConferenceLeague #SaudiProLeague #CarabaoCup #FAcup
+#Football #LiveScores #SoccerUpdates #MatchDay #ScoreUpdate #FullTime #GoalAlert #SportsNews #WorldFootball #PlayReportZA #LiveMatchTracker #InstantScores #SoccerFans #InternationalFootball #LeagueUpdates #LiveSports #FootballStats #UEFAChampionsLeague #EuropaLeague #ConferenceLeague #PremierLeague #LaLiga #SerieA #Bundesliga #Ligue1 #Eredivisie #MLS #AFCON #CAFChampionsLeague #FIFAWorldCup #UCLNight #CopaLibertadores #EuropaConferenceLeague #SaudiProLeague #CarabaoCup #FAcup
 #EuroQualifiers #TodayMatches #ScoreFeed #GlobalSport`;
 
   return post.trim();
